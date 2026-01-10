@@ -1,0 +1,8 @@
+build/
+*.o
+*.a
+*.so
+*.deb
+.DS_Store
+deps/httplib.h
+deps/json.hpp
