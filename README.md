@@ -1,4 +1,4 @@
-# 🚨 Touchless Triage - 10-Second Biometric & Visual Analysis
+# 🚨 Frontline - 10-Second Biometric & Visual Analysis
 
 A frontend web application that performs instant "Touchless Triage" using camera-based biometric sensing and visual analysis. Built according to RULES.md specifications.
 
