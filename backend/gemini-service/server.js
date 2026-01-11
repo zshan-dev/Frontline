@@ -679,6 +679,93 @@ app.get('/test', (req, res) => {
   });
 });
 
+// Chat endpoint for voice agent conversation
+app.use(express.json());
+
+app.post('/chat', async (req, res) => {
+  const { userMessage, reportContext, conversationHistory = [] } = req.body;
+  
+  console.log('\n' + '='.repeat(60));
+  console.log('[CHAT] Voice Agent Request');
+  console.log('='.repeat(60));
+  console.log(`[CHAT] User message: "${userMessage}"`);
+  console.log(`[CHAT] Report context provided: ${reportContext ? 'Yes' : 'No'}`);
+  console.log(`[CHAT] Conversation history: ${conversationHistory.length} messages`);
+
+  if (!userMessage) {
+    return res.status(400).json({ error: 'userMessage is required' });
+  }
+
+  try {
+    // Build context from report
+    const erSummary = reportContext?.erSummary || {};
+    const simVitals = reportContext?.simulatedVitals || {};
+    const imageAnalysis = reportContext?.imageAnalysis || {};
+    const actions = reportContext?.actions || [];
+
+    const contextSummary = `
+CURRENT INCIDENT REPORT:
+- Triage Level: ${erSummary.triageLevel || 'Unknown'}
+- Chief Complaint: ${erSummary.chiefComplaint || 'Not specified'}
+- Suspected Injuries: ${erSummary.suspectedInjuries?.join(', ') || 'None identified'}
+- Body Position: ${imageAnalysis.position || 'Unknown'}
+- Distress Level: ${imageAnalysis.distressLevel || 'Unknown'}
+- Visible Injuries: ${imageAnalysis.injuries?.join(', ') || 'None detected'}
+- Heart Rate: ${simVitals.heartRate || 'N/A'} BPM
+- Respiratory Rate: ${simVitals.respiratoryRate || 'N/A'} /min
+- Oxygen Saturation: ${simVitals.oxygenSaturation || 'N/A'}%
+- Blood Loss: ${simVitals.bloodLoss || 'None'}
+- Shock Risk: ${simVitals.shockRisk || 'Unknown'}
+- Recommended Actions: ${actions.slice(0, 5).join('; ') || 'None'}
+`;
+
+    const systemPrompt = `You are a calm, professional EMS dispatch agent helping someone with a medical emergency.
+You have access to the following incident report data:
+
+${contextSummary}
+
+IMPORTANT RULES:
+1. Be calm, reassuring, and supportive
+2. Give clear, actionable first-aid instructions
+3. Keep responses SHORT (2-3 sentences max) - this will be spoken aloud
+4. If the situation seems critical, tell them to call 911 immediately
+5. Don't provide medical diagnoses, just first-aid guidance
+6. Ask follow-up questions to assess the situation better
+7. Always prioritize safety
+
+Respond naturally as if you're on a phone call with them.`;
+
+    // Build conversation for Gemini
+    const conversationPrompt = conversationHistory.length > 0
+      ? conversationHistory.map(m => `${m.role === 'user' ? 'Caller' : 'Agent'}: ${m.content}`).join('\n') + `\nCaller: ${userMessage}\nAgent:`
+      : `Caller: ${userMessage}\nAgent:`;
+
+    const fullPrompt = `${systemPrompt}\n\nConversation:\n${conversationPrompt}`;
+
+    console.log('[CHAT] Calling Gemini API...');
+    const result = await model.generateContent(fullPrompt);
+    const response = await result.response;
+    const agentResponse = response.text().trim();
+
+    console.log(`[CHAT] ✓ Agent response: "${agentResponse}"`);
+    console.log('='.repeat(60) + '\n');
+
+    res.json({
+      ok: true,
+      response: agentResponse,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('[CHAT] Error:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'Failed to generate response',
+      message: error.message
+    });
+  }
+});
+
 // Initialize and start server
 ensureDirs().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
@@ -690,6 +777,7 @@ ensureDirs().then(() => {
     console.log(`Network: http://0.0.0.0:${PORT}`);
     console.log('\nEndpoints:');
     console.log(`  POST http://localhost:${PORT}/analyze-video`);
+    console.log(`  POST http://localhost:${PORT}/chat`);
     console.log(`  GET  http://localhost:${PORT}/health`);
     console.log(`  GET  http://localhost:${PORT}/test`);
     console.log('\nWaiting for requests...');
