@@ -54,6 +54,22 @@ A full-stack web application that performs instant "Touchless Triage" using came
   - Presage API Key (for biometric sensing)
   - Google Gemini API Key (for visual analysis)
   - ElevenLabs API Key (for text-to-speech)
+ 
+
+## 📝 Implementation Details
+
+- **Biometric Sensing**: Simulates Presage SDK data collection (HR, RR, Focus)
+- **Visual Analysis**: Generates mock visual analysis based on vitals patterns
+- **Report Generation**: Frontend-only logic that combines all data sources
+- **Audio Instructions**: Uses browser's built-in Web Speech API
+- **No Backend Required**: Everything runs client-side
+
+## 🔒 Privacy & Security
+
+- All processing happens client-side (no data sent to servers)
+- Camera access requires explicit user permission
+- No external API calls or data transmission
+- Reports are generated locally and can be exported
 
 ### Installation
 
