@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import CameraScanner from './components/CameraScanner'
 import IncidentReport from './components/IncidentReport'
+import HowItWorksModal from './components/HowItWorksModal'
 import './App.css'
 
 // Backend API endpoint
@@ -41,8 +42,14 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStatus, setProcessingStatus] = useState('')
   const [recordedVideoUrl, setRecordedVideoUrl] = useState(null)
+  const [showHowItWorks, setShowHowItWorks] = useState(false)
+  const [isButtonAnimating, setIsButtonAnimating] = useState(false)
 
-  const handleStartScan = () => {
+  const handleStartScan = (e) => {
+    // Ripple effect
+    setIsButtonAnimating(true)
+    setTimeout(() => setIsButtonAnimating(false), 600)
+    
     setIsScanning(true)
     setScanProgress(0)
     setIncidentReport(null)
@@ -423,60 +430,111 @@ function App() {
   }
 
   return (
-    <div className={`min-h-screen bg-surface ${!isScanning && !incidentReport ? 'flex flex-col justify-center' : ''} relative`}>
-      <div className="app-container py-8 md:py-12">
-        {/* Header for initial page - Logo + Text */}
-        {!isScanning && !incidentReport && (
-          <header className="text-center mb-1 md:mb-2">
-            <div className="flex items-center justify-center mb-0">
-                <img 
-                  src="/images/frontlinenobg.png" 
-                  alt="Frontline Logo" 
-                  className="h-72 md:h-96 lg:h-[500px] w-auto object-contain"
-                  style={{ 
-                    filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15))'
-                  }}
-                />
+    <div className="min-h-screen bg-white relative overflow-hidden">
+      {/* Subtle background treatment */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Radial gradient vignette */}
+        <div 
+          className="absolute inset-0"
+          style={{
+            background: 'radial-gradient(circle at center, rgba(6, 182, 212, 0.08) 0%, rgba(6, 182, 212, 0.03) 40%, transparent 70%)'
+          }}
+        />
+        {/* Noise texture */}
+        <div className="absolute inset-0 noise-texture opacity-30" />
+      </div>
+
+      {/* Header for scanning/report pages - Logo only in top left */}
+      {(isScanning || incidentReport || isProcessing) && (
+        <header className="absolute top-6 left-6 z-10">
+          <img 
+            src="/images/frontlinenobg.png" 
+            alt="Frontline Logo" 
+            className="h-12 md:h-16 w-auto object-contain"
+            style={{ 
+              filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))'
+            }}
+          />
+        </header>
+      )}
+
+      {/* Landing Page - Hero Centered */}
+      {!isScanning && !incidentReport && (
+        <div className="min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 relative z-10">
+          {/* Hero Section */}
+          <div className="text-center mb-6 animate-fade-in">
+            {/* Logo and Subheadline - Tight Grouping */}
+            <div className="flex flex-col items-center">
+              <img 
+                src="/images/frontlinenobg.png" 
+                alt="Frontline Logo" 
+                className="h-48 md:h-56 lg:h-64 w-auto object-contain"
+                style={{ 
+                  filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))',
+                  marginBottom: '-30px'
+                }}
+              />
+              <p className="text-xl text-gray-700 font-medium" style={{ marginTop: '-20px', lineHeight: '1.2' }}>
+                Biometric assessment in seconds.
+              </p>
             </div>
-          </header>
-        )}
+          </div>
 
-        {/* Header for scanning/report pages - Logo only in top left */}
-        {(isScanning || incidentReport || isProcessing) && (
-          <header className="text-left mb-6 -mt-4 -ml-4 md:-mt-6 md:-ml-6">
-            <img 
-              src="/images/frontlinenobg.png" 
-              alt="Frontline Logo" 
-              className="h-12 md:h-16 w-auto object-contain"
-              style={{ 
-                filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))'
+          {/* Main Card */}
+          <div className="w-full max-w-md animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
+            <div 
+              className="bg-white/80 backdrop-blur-md rounded-2xl border border-gray-200/50 shadow-xl p-8"
+              style={{
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08), 0 1px 0 rgba(255, 255, 255, 0.5) inset'
               }}
-            />
-          </header>
-        )}
-
-        {!isScanning && !incidentReport && (
-          <div className="max-w-2xl mx-auto -mt-16 md:-mt-24">
-            <div className="panel p-10 hover:bg-surface-2 transition-colors">
-              <div className="text-center mb-8">
-                <p className="text-text-muted text-base leading-relaxed mb-6">
-                  Point your camera at the person needing first aid to begin the biometric assessment
+            >
+              {/* Instructions */}
+              <div className="text-center mb-6">
+                <p className="text-gray-900 font-medium mb-2">
+                  Point your camera at the person needing first aid
+                </p>
+                <p className="text-sm text-gray-500">
+                  Hold steady for best results
                 </p>
               </div>
+
+              {/* Start Scan Button */}
               <button
                 onClick={handleStartScan}
-                className="w-full flex items-center justify-center gap-2 text-black font-medium py-3 px-6 rounded-lg transition-all hover:opacity-90 border-2"
-                style={{ backgroundColor: '#7FE3FF', borderColor: '#1e3a5f' }}
+                className={`relative w-full bg-cyan-500 text-gray-900 font-semibold py-4 px-6 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 hover:bg-cyan-600 active:scale-95 overflow-hidden ${
+                  isButtonAnimating ? 'ripple-effect' : ''
+                }`}
+                aria-label="Start biometric scan"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Start Scan
+                <span className="relative flex items-center justify-center gap-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Start Scan
+                </span>
+              </button>
+
+              {/* Learn How It Works Button */}
+              <button
+                onClick={() => setShowHowItWorks(true)}
+                className="w-full mt-4 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 rounded-lg py-2"
+                aria-label="Learn how it works"
+              >
+                Learn how it works
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* How It Works Modal */}
+      <HowItWorksModal 
+        isOpen={showHowItWorks} 
+        onClose={() => setShowHowItWorks(false)} 
+      />
+
+      <div className="app-container py-8 md:py-12 relative z-10">
 
         {isScanning && (
           <CameraScanner
