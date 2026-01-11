@@ -40,6 +40,7 @@ function App() {
   const [presageData, setPresageData] = useState(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStatus, setProcessingStatus] = useState('')
+  const [recordedVideoUrl, setRecordedVideoUrl] = useState(null)
 
   const handleStartScan = () => {
     setIsScanning(true)
@@ -71,6 +72,10 @@ function App() {
     setProcessingStatus('Preparing video for analysis...')
     setPresageData(vitalsData)
     setError(null)
+    
+    // Save video URL for playback
+    const videoUrl = URL.createObjectURL(videoFile)
+    setRecordedVideoUrl(videoUrl)
 
     try {
       // Send video file to backend for analysis
@@ -422,21 +427,16 @@ function App() {
       <div className="app-container py-8 md:py-12">
         {/* Header for initial page - Logo + Text */}
         {!isScanning && !incidentReport && (
-          <header className="text-center mb-12 md:mb-16">
-            <div className="flex items-center justify-center mb-6">
+          <header className="text-center mb-1 md:mb-2">
+            <div className="flex items-center justify-center mb-0">
                 <img 
-                  src="/images/Logo.png" 
-                alt="FrontLine Logo" 
-                className="h-16 md:h-20 lg:h-24 w-auto object-contain"
-                style={{ 
-                  filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))',
-                  marginRight: '2px',
-                  display: 'inline-block'
-                }}
-              />
-              <h1 className="text-3xl md:text-4xl lg:text-5xl text-text tracking-tight canela-italic-bold" style={{ marginLeft: '0px', lineHeight: '1.2', display: 'inline-block' }}>
-                rontline
-              </h1>
+                  src="/images/frontlinenobg.png" 
+                  alt="Frontline Logo" 
+                  className="h-72 md:h-96 lg:h-[500px] w-auto object-contain"
+                  style={{ 
+                    filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15))'
+                  }}
+                />
             </div>
           </header>
         )}
@@ -445,8 +445,8 @@ function App() {
         {(isScanning || incidentReport || isProcessing) && (
           <header className="text-left mb-6 -mt-4 -ml-4 md:-mt-6 md:-ml-6">
             <img 
-              src="/images/Logo.png" 
-              alt="FrontLine Logo" 
+              src="/images/frontlinenobg.png" 
+              alt="Frontline Logo" 
               className="h-12 md:h-16 w-auto object-contain"
               style={{ 
                 filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))'
@@ -456,7 +456,7 @@ function App() {
         )}
 
         {!isScanning && !incidentReport && (
-          <div className="max-w-2xl mx-auto mt-8 md:mt-12">
+          <div className="max-w-2xl mx-auto -mt-16 md:-mt-24">
             <div className="panel p-10 hover:bg-surface-2 transition-colors">
               <div className="text-center mb-8">
                 <p className="text-text-muted text-base leading-relaxed mb-6">
@@ -465,7 +465,8 @@ function App() {
               </div>
               <button
                 onClick={handleStartScan}
-                className="w-full btn-primary-cyan flex items-center justify-center gap-2"
+                className="w-full flex items-center justify-center gap-2 text-black font-medium py-3 px-6 rounded-lg transition-all hover:opacity-90 border-2"
+                style={{ backgroundColor: '#7FE3FF', borderColor: '#1e3a5f' }}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -532,7 +533,7 @@ function App() {
 
         {incidentReport && (
           <div className="mt-8">
-            <IncidentReport report={incidentReport} vitals={presageData} />
+            <IncidentReport report={incidentReport} vitals={presageData} videoUrl={recordedVideoUrl} />
             <div className="text-center mt-12">
               <button
                 onClick={handleNewScan}

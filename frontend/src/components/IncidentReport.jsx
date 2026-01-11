@@ -1,4 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+
+// Backend URLs
+const GEMINI_URL = import.meta.env.VITE_GEMINI_URL || 'http://localhost:3000'
+const ELEVENLABS_URL = import.meta.env.VITE_ELEVENLABS_URL || 'http://localhost:3001'
 
 // Mock hospital data for GTA Area
 const GTA_HOSPITALS = [
@@ -14,11 +18,31 @@ const GTA_HOSPITALS = [
   { id: 'markham-stouffville', name: 'Markham Stouffville Hospital', city: 'Markham', phone: '905-472-7000' },
 ]
 
-const IncidentReport = ({ report }) => {
+const IncidentReport = ({ report, videoUrl }) => {
   const [copied, setCopied] = useState(false)
   const [selectedHospital, setSelectedHospital] = useState(GTA_HOSPITALS[0].id)
   const [showHospitalSelect, setShowHospitalSelect] = useState(false)
   const [sendStatus, setSendStatus] = useState(null) // null | 'sending' | 'sent'
+  const [showVideoPlayback, setShowVideoPlayback] = useState(false)
+  
+  // Voice Agent State
+  const [isAgentActive, setIsAgentActive] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [isAgentSpeaking, setIsAgentSpeaking] = useState(false)
+  const [agentStatus, setAgentStatus] = useState('') // Status message
+  const [conversationHistory, setConversationHistory] = useState([])
+  const [currentTranscript, setCurrentTranscript] = useState('')
+  
+  const recognitionRef = useRef(null)
+  const audioRef = useRef(null)
+  const silenceTimeoutRef = useRef(null)
+  const finalTranscriptRef = useRef('')
+  const isAgentActiveRef = useRef(false)
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    isAgentActiveRef.current = isAgentActive
+  }, [isAgentActive])
 
   const getUrgencyColor = (urgency) => {
     switch (urgency?.toLowerCase()) {
@@ -119,9 +143,232 @@ ${report.disclaimer || 'All vitals are simulated for demonstration purposes and 
     }, 1500)
   }
 
-  const speakWithAgent = () => {
-    // Mock agent connection
-    alert('Connecting you to a live EMS agent...\n\nThis is a demo feature. In production, this would connect to a 24/7 emergency dispatch center.')
+  // Initialize Speech Recognition
+  const initSpeechRecognition = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Speech recognition is not supported in this browser. Please use Chrome.')
+      return null
+    }
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true  // Keep listening
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+    recognition.maxAlternatives = 1
+    
+    return recognition
+  }
+
+  // Send message to Gemini and get response
+  const getAgentResponse = async (userMessage) => {
+    try {
+      const response = await fetch(`${GEMINI_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userMessage,
+          reportContext: report,
+          conversationHistory
+        })
+      })
+      
+      if (!response.ok) throw new Error('Failed to get agent response')
+      
+      const data = await response.json()
+      return data.response
+    } catch (error) {
+      console.error('Agent response error:', error)
+      return "I'm having trouble connecting. Please try again or call 911 if this is an emergency."
+    }
+  }
+
+  // Convert text to speech using ElevenLabs
+  const speakResponse = async (text) => {
+    try {
+      setIsAgentSpeaking(true)
+      setAgentStatus('Agent speaking...')
+      
+      const response = await fetch(`${ELEVENLABS_URL}/text-to-speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+      
+      if (!response.ok) throw new Error('TTS failed')
+      
+      const audioBlob = await response.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl
+        audioRef.current.onended = () => {
+          setIsAgentSpeaking(false)
+          URL.revokeObjectURL(audioUrl)
+          // Start listening again after agent finishes speaking
+          if (isAgentActiveRef.current) {
+            setTimeout(() => startListening(), 500) // Small delay before listening again
+          }
+        }
+        await audioRef.current.play()
+      }
+    } catch (error) {
+      console.error('TTS error:', error)
+      setIsAgentSpeaking(false)
+      // Fallback to browser TTS
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.rate = 0.9
+        utterance.onend = () => {
+          setIsAgentSpeaking(false)
+          if (isAgentActiveRef.current) {
+            setTimeout(() => startListening(), 500)
+          }
+        }
+        speechSynthesis.speak(utterance)
+      }
+    }
+  }
+
+  // Start listening for user speech
+  const startListening = () => {
+    // Clear any existing silence timeout
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current)
+    }
+    finalTranscriptRef.current = ''
+    
+    if (!recognitionRef.current) {
+      recognitionRef.current = initSpeechRecognition()
+      if (!recognitionRef.current) return
+      
+      recognitionRef.current.onresult = (event) => {
+        let interimTranscript = ''
+        let finalTranscript = ''
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript
+          } else {
+            interimTranscript += transcript
+          }
+        }
+        
+        // Accumulate final transcript
+        if (finalTranscript) {
+          finalTranscriptRef.current += finalTranscript
+        }
+        
+        // Show both final and interim
+        const displayTranscript = finalTranscriptRef.current + interimTranscript
+        setCurrentTranscript(displayTranscript)
+        
+        // Reset silence timeout on any speech activity
+        if (silenceTimeoutRef.current) {
+          clearTimeout(silenceTimeoutRef.current)
+        }
+        
+        // Wait 2 seconds of silence before processing
+        if (displayTranscript.trim()) {
+          silenceTimeoutRef.current = setTimeout(() => {
+            if (finalTranscriptRef.current.trim() || displayTranscript.trim()) {
+              const messageToSend = finalTranscriptRef.current.trim() || displayTranscript.trim()
+              // Stop recognition before processing
+              if (recognitionRef.current) {
+                recognitionRef.current.stop()
+              }
+              handleUserMessage(messageToSend)
+            }
+          }, 2000) // 2 second silence before processing
+        }
+      }
+      
+      recognitionRef.current.onend = () => {
+        setIsListening(false)
+        // Don't auto-restart - wait for agent to finish or user to tap
+      }
+      
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error)
+        setIsListening(false)
+        if (event.error !== 'aborted' && event.error !== 'no-speech') {
+          setAgentStatus('Tap the mic to speak')
+        }
+      }
+    }
+    
+    try {
+      recognitionRef.current.start()
+      setIsListening(true)
+      setCurrentTranscript('')
+      finalTranscriptRef.current = ''
+      setAgentStatus('Listening... (speak, then pause when done)')
+    } catch (e) {
+      console.error('Failed to start recognition:', e)
+    }
+  }
+
+  // Handle user's spoken message
+  const handleUserMessage = async (message) => {
+    if (!message.trim()) return
+    
+    setIsListening(false)
+    setAgentStatus('Processing...')
+    
+    // Add user message to history
+    const newHistory = [...conversationHistory, { role: 'user', content: message }]
+    setConversationHistory(newHistory)
+    
+    // Get agent response
+    const agentResponse = await getAgentResponse(message)
+    
+    // Add agent response to history
+    setConversationHistory([...newHistory, { role: 'agent', content: agentResponse }])
+    
+    // Speak the response
+    await speakResponse(agentResponse)
+  }
+
+  // Main function to start/stop agent
+  const speakWithAgent = async () => {
+    if (isAgentActive) {
+      // Stop the agent
+      setIsAgentActive(false)
+      setIsListening(false)
+      setIsAgentSpeaking(false)
+      setAgentStatus('')
+      setConversationHistory([])
+      setCurrentTranscript('')
+      finalTranscriptRef.current = ''
+      
+      // Clear silence timeout
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current)
+        silenceTimeoutRef.current = null
+      }
+      
+      if (recognitionRef.current) {
+        recognitionRef.current.abort()
+        recognitionRef.current = null
+      }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+      }
+      speechSynthesis.cancel()
+      return
+    }
+    
+    // Start the agent
+    setIsAgentActive(true)
+    setAgentStatus('Connecting to agent...')
+    
+    // Initial greeting from agent
+    const greeting = "Hi, I'm your EMS support agent. I can see the incident report. How can I help you right now?"
+    setConversationHistory([{ role: 'agent', content: greeting }])
+    
+    await speakResponse(greeting)
   }
 
   const urgencyStyle = getUrgencyColor(report.urgency || report.erSummary?.triageLevel)
@@ -253,6 +500,19 @@ ${report.disclaimer || 'All vitals are simulated for demonstration purposes and 
 
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-3 justify-center">
+          {/* ER Playback Button */}
+          {videoUrl && (
+            <button
+              onClick={() => setShowVideoPlayback(true)}
+              className="btn-secondary inline-flex items-center gap-2 text-sm px-4 py-2 border-2 border-red-400"
+            >
+              <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              ER Playback
+            </button>
+          )}
           <button
             onClick={copyToClipboard}
             className="btn-secondary inline-flex items-center gap-2 text-sm px-4 py-2"
@@ -326,15 +586,118 @@ ${report.disclaimer || 'All vitals are simulated for demonstration purposes and 
           {/* Speak with Agent Button */}
           <button
             onClick={speakWithAgent}
-            className="btn-primary-cyan inline-flex items-center gap-2 text-sm px-4 py-2"
+            className={`inline-flex items-center gap-2 text-sm px-4 py-2 rounded-lg transition-colors ${
+              isAgentActive 
+                ? 'bg-red-500 hover:bg-red-600 text-white' 
+                : 'btn-primary-cyan'
+            }`}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-            </svg>
-            Speak with Agent
+            {isAgentActive ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                End Call
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+                Speak with Agent
+              </>
+            )}
           </button>
         </div>
+
+        {/* Voice Agent Panel */}
+        {isAgentActive && (
+          <div className="mt-4 panel p-4 border-2 border-cyan-500/30 bg-cyan-500/5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${isListening ? 'bg-red-500 animate-pulse' : isAgentSpeaking ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                <span className="text-sm font-medium text-text">{agentStatus || 'Connected'}</span>
+              </div>
+              {!isAgentSpeaking && !isListening && (
+                <button
+                  onClick={startListening}
+                  className="btn-primary-cyan text-xs px-3 py-1 flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </svg>
+                  Tap to Speak
+                </button>
+              )}
+            </div>
+            
+            {/* Current transcript */}
+            {currentTranscript && (
+              <div className="text-sm text-text-muted italic mb-2">
+                "{currentTranscript}"
+              </div>
+            )}
+            
+            {/* Conversation history */}
+            <div className="max-h-32 overflow-y-auto space-y-2">
+              {conversationHistory.slice(-4).map((msg, i) => (
+                <div key={i} className={`text-sm ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                  <span className={`inline-block px-3 py-1 rounded-lg ${
+                    msg.role === 'user' 
+                      ? 'bg-cyan-500/20 text-text' 
+                      : 'bg-surface-2 text-text'
+                  }`}>
+                    {msg.content}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Hidden audio element for TTS playback */}
+        <audio ref={audioRef} className="hidden" />
       </div>
+
+      {/* Video Playback Modal */}
+      {showVideoPlayback && videoUrl && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                ER Recording Playback
+              </h3>
+              <button
+                onClick={() => setShowVideoPlayback(false)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 bg-black">
+              <video 
+                src={videoUrl} 
+                controls 
+                autoPlay
+                className="w-full max-h-[60vh] rounded"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div className="p-4 border-t border-gray-200 text-center">
+              <p className="text-sm text-gray-500">
+                Recording from incident #{report.reportId || 'N/A'} • {report.timestamp || new Date().toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
