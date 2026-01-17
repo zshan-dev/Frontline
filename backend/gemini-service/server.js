@@ -188,12 +188,28 @@ async function imageToBase64(imagePath) {
 }
 
 // Analyze frames with Gemini
-async function analyzeFrames(framePaths) {
+async function analyzeFrames(framePaths, presageData = null) {
+  // Build prompt with real Presage vitals if available
+  const presageVitalsSection = presageData ? `
+**REAL VITAL SIGNS (from Presage SmartSpectra SDK - ACTUAL MEASUREMENTS):**
+- Heart Rate: ${presageData.heart_rate?.avg ? Math.round(presageData.heart_rate.avg) : 'N/A'} BPM 
+  (Range: ${presageData.heart_rate?.min ? Math.round(presageData.heart_rate.min) : 'N/A'} - ${presageData.heart_rate?.max ? Math.round(presageData.heart_rate.max) : 'N/A'} BPM)
+- Breathing Rate: ${presageData.breathing_rate?.avg ? Math.round(presageData.breathing_rate.avg) : 'N/A'} breaths/min
+  (Range: ${presageData.breathing_rate?.min ? Math.round(presageData.breathing_rate.min) : 'N/A'} - ${presageData.breathing_rate?.max ? Math.round(presageData.breathing_rate.max) : 'N/A'} breaths/min)
+- Total readings: ${presageData.readings_count || 0}
+
+**IMPORTANT:** These are REAL vital signs extracted from video using Presage SmartSpectra SDK. Use these actual measurements in your analysis. Do NOT simulate or generate vitals - use the real Presage data provided above.
+` : `
+**Note:** No real vital signs available. Generate realistic simulated vitals for demonstration purposes only.
+`;
+
   const prompt = `You are a medical triage and incident analysis AI.
 
 You will be given:
 1) One or more images of a person involved in a medical or emergency scenario
-2) Optional contextual data (time, location, short description)
+2) ${presageData ? '**REAL vital signs from Presage SmartSpectra SDK**' : 'Optional contextual data (time, location, short description)'}
+
+${presageVitalsSection}
 
 Your tasks:
 
@@ -204,17 +220,25 @@ Analyze the image(s) and identify:
 - Apparent distress level (low / moderate / severe)
 - Environmental risk factors (traffic, fire, sharp objects, unsafe surroundings)
 
-2. SIMULATED VITAL SIGNS (DEMO / NON-MEDICAL)
-Generate **realistic but clearly simulated vitals** inspired by Presage-style physiological outputs.
-These values are **NOT real measurements** and are for demonstration only.
+2. VITAL SIGNS ANALYSIS
+${presageData ? `
+Use the REAL vital signs provided above from Presage SmartSpectra SDK.
+For additional vitals not provided by Presage (O2 saturation, blood loss, stress, shock risk), generate realistic estimates based on:
+- The real heart rate and breathing rate provided
+- Visual analysis of the images
+- Standard medical correlations
+` : `
+Generate **realistic but clearly simulated vitals** for demonstration purposes only.
+These values are **NOT real measurements**.
+`}
 
-Generate:
-- Heart Rate (bpm)
-- Respiratory Rate (breaths/min)
-- Blood Oxygen Saturation (%)
-- Estimated Blood Loss (none / mild / moderate / severe)
-- Stress Level (low / moderate / high)
-- Shock Risk (low / moderate / high)
+Provide:
+- Heart Rate (bpm) ${presageData ? '- USE THE REAL VALUE FROM PRESAGE DATA ABOVE' : '- Generate realistic value'}
+- Respiratory Rate (breaths/min) ${presageData ? '- USE THE REAL VALUE FROM PRESAGE DATA ABOVE' : '- Generate realistic value'}
+- Blood Oxygen Saturation (%) - Estimate based on visual analysis
+- Estimated Blood Loss (none / mild / moderate / severe) - Based on visible bleeding
+- Stress Level (low / moderate / high) - Based on real vitals and visual cues
+- Shock Risk (low / moderate / high) - Based on real vitals and visual analysis
 
 3. HEALTH & FIRST-AID GUIDANCE
 Provide:
@@ -244,8 +268,8 @@ Return ONLY valid JSON in the following structure:
     "environmental_risks": []
   },
   "simulated_vitals": {
-    "heart_rate_bpm": "",
-    "respiratory_rate_bpm": "",
+    "heart_rate_bpm": ${presageData && presageData.heart_rate?.avg ? Math.round(presageData.heart_rate.avg) : '""'},
+    "respiratory_rate_bpm": ${presageData && presageData.breathing_rate?.avg ? Math.round(presageData.breathing_rate.avg) : '""'},
     "oxygen_saturation_percent": "",
     "estimated_blood_loss": "",
     "stress_level": "",
@@ -270,13 +294,13 @@ Return ONLY valid JSON in the following structure:
     "time": "",
     "recommended_follow_up": ""
   },
-  "disclaimer": "All vitals are simulated for demonstration purposes and are not medical measurements."
+  "disclaimer": "${presageData ? 'Heart rate and breathing rate are REAL measurements from Presage SmartSpectra SDK. Other vitals are estimates based on visual analysis.' : 'All vitals are simulated for demonstration purposes and are not medical measurements.'}"
 }
 
 IMPORTANT RULES:
 - Do NOT provide diagnoses
 - Do NOT claim medical certainty
-- Always clarify vitals are simulated
+${presageData ? '- Heart rate and breathing rate are REAL measurements - use the exact values provided above' : '- Always clarify vitals are simulated'}
 - Prioritize user safety and emergency escalation when appropriate
 - Return ONLY the JSON object, no additional text`;
 
@@ -557,10 +581,19 @@ app.post('/analyze-video', (req, res, next) => {
 
     console.log(`[${requestId}] Using ${framePaths.length} frames for Gemini analysis`);
 
-    // Analyze with Gemini
+    // Analyze with Gemini (pass Presage data if available)
     console.log(`[${requestId}] Calling Gemini API for analysis...`);
+    if (presage) {
+      console.log(`[${requestId}] Including Presage vitals in Gemini analysis:`, {
+        heart_rate_avg: presage.heart_rate?.avg,
+        breathing_rate_avg: presage.breathing_rate?.avg,
+        readings_count: presage.readings_count
+      });
+    } else {
+      console.log(`[${requestId}] No Presage data available - using simulated vitals`);
+    }
     const geminiStartTime = Date.now();
-    const geminiResult = await analyzeFrames(framePaths);
+    const geminiResult = await analyzeFrames(framePaths, presage);
     const geminiTime = ((Date.now() - geminiStartTime) / 1000).toFixed(2);
     console.log(`[${requestId}] Gemini API call completed in ${geminiTime}s`);
     console.log(`[${requestId}] Gemini analysis result:`, geminiResult.success ? '✓ Success' : '✗ Failed');

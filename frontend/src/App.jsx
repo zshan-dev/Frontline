@@ -444,6 +444,10 @@ function App() {
       }
 
       // Generate the comprehensive report
+      // Use realVitals directly (from Presage response) instead of presageData state
+      // to avoid React state update timing issues
+      const currentPresageVitals = realVitals || presageData || {};
+      
       const report = {
         reportId: reportId,
         timestamp: new Date().toLocaleString(),
@@ -455,7 +459,7 @@ function App() {
         simulatedVitals: geminiVitals,
         
         // REAL vitals from Presage SDK (not simulated!)
-        presageVitals: presageData, // This now contains REAL data from Presage Engine
+        presageVitals: currentPresageVitals, // Use realVitals directly to ensure data is available
         
         // Health guidance
         actions: actions,
