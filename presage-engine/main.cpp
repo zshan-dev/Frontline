@@ -268,19 +268,20 @@ void run_camera_test(const std::string& api_key) {
 }
 
 #else
-// ERROR: SDK not available - fail explicitly
+// SDK not available - allow server to start for SDK installation
 bool initialize_sdk(const std::string& api_key) {
     std::cerr << "========================================" << std::endl;
-    std::cerr << "❌ ERROR: Presage SmartSpectra SDK NOT AVAILABLE" << std::endl;
-    std::cerr << "❌ Application compiled without SDK support" << std::endl;
+    std::cerr << "⚠️  WARNING: Presage SmartSpectra SDK NOT AVAILABLE" << std::endl;
+    std::cerr << "⚠️  Application compiled without SDK support" << std::endl;
     std::cerr << "========================================" << std::endl;
     std::cerr << "To use the real Presage SDK:" << std::endl;
     std::cerr << "1. Install libsmartspectra-dev package" << std::endl;
     std::cerr << "2. Ensure SDK libraries are in /usr/lib or /usr/local/lib" << std::endl;
     std::cerr << "3. Rebuild the application" << std::endl;
     std::cerr << "========================================" << std::endl;
-    sdk_initialized = false;
-    return false;  // Fail initialization
+    std::cerr << "Server will start in limited mode. Install SDK and rebuild to enable full functionality." << std::endl;
+    sdk_initialized = false;  // Mark as not initialized, but allow server to start
+    return true;  // Allow server to start so SDK can be installed
 }
 
 void run_camera_test(const std::string& api_key) {
@@ -312,11 +313,9 @@ int main(int argc, char** argv) {
         api_key = "";  // Continue anyway for testing
     }
 
-    // Initialize SDK
-    if (!initialize_sdk(api_key)) {
-        std::cerr << "Failed to initialize SDK. Exiting." << std::endl;
-        return 1;
-    }
+    // Initialize SDK (allow server to start even if SDK not available)
+    initialize_sdk(api_key);
+    // Note: Server will start even if SDK is not available, allowing SDK installation
 
     // Check camera
     bool camera_available = check_camera_device();
@@ -325,8 +324,22 @@ int main(int argc, char** argv) {
     // Create HTTP server
     httplib::Server svr;
 
+    // Helper function to set CORS headers
+    auto set_cors_headers = [](httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+    };
+
+    // Handle OPTIONS preflight requests for all routes
+    svr.Options(".*", [set_cors_headers](const httplib::Request&, httplib::Response& res) {
+        set_cors_headers(res);
+        res.status = 200;
+    });
+
     // GET /status
-    svr.Get("/status", [](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/status", [set_cors_headers](const httplib::Request&, httplib::Response& res) {
+        set_cors_headers(res);
 #ifdef PRESAGE_SDK_AVAILABLE
         bool sdk_available = true;
         std::string sdk_status = "Presage SmartSpectra SDK is AVAILABLE and ACTIVE";
@@ -349,7 +362,8 @@ int main(int argc, char** argv) {
     });
 
     // POST /process-video - Upload video, process, and return vitals JSON
-    svr.Post("/process-video", [api_key](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/process-video", [api_key, set_cors_headers](const httplib::Request& req, httplib::Response& res) {
+        set_cors_headers(res);
         if (camera_running.load()) {
             res.status = 409;
             json response = {{"error", "Processing already in progress. Wait for current processing to complete."}};
@@ -445,7 +459,8 @@ int main(int argc, char** argv) {
     });
 
     // POST /upload - Upload MP4 video file (legacy endpoint)
-    svr.Post("/upload", [](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/upload", [set_cors_headers](const httplib::Request& req, httplib::Response& res) {
+        set_cors_headers(res);
         if (camera_running.load()) {
             res.status = 409;  // Conflict
             json response = {{"error", "Processing already running. Wait for it to complete."}};
@@ -500,7 +515,8 @@ int main(int argc, char** argv) {
     });
 
     // GET /test - Run video processing (camera or uploaded video)
-    svr.Get("/test", [api_key](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/test", [api_key, set_cors_headers](const httplib::Request&, httplib::Response& res) {
+        set_cors_headers(res);
         if (camera_running.load()) {
             res.status = 409;  // Conflict
             json response = {{"error", "Processing already running"}};
@@ -537,7 +553,8 @@ int main(int argc, char** argv) {
     });
 
     // GET /live - Get latest vitals
-    svr.Get("/live", [](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/live", [set_cors_headers](const httplib::Request&, httplib::Response& res) {
+        set_cors_headers(res);
         std::lock_guard<std::mutex> lock(vitals_mutex);
         if (latest_vitals.empty()) {
             json response = {
@@ -551,7 +568,8 @@ int main(int argc, char** argv) {
     });
 
     // Health check
-    svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/health", [set_cors_headers](const httplib::Request&, httplib::Response& res) {
+        set_cors_headers(res);
         res.set_content("OK", "text/plain");
     });
 
